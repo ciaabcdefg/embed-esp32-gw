@@ -2,5 +2,8 @@
   "files.associations": {
     "*.embeddedhtml": "html",
     "*.old": "cpp"
-  }
+  },
+  "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: Google, IndentWidth: 4, ColumnLimit: 0}",
+  "editor.detectIndentation": false,
+  "editor.tabSize": 4
 }
