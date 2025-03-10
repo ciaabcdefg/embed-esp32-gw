@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+#include <HTTPUtils.h>
 #include <HardwareSerial.h>
 #include <MFRC522.h>
 #include <PubSubClient.h>
@@ -5,14 +7,21 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
+#include <unordered_set>
+
 #define SS1 5  // Chip Select for Reader 1
 #define SS2 4  // Chip Select for Reader 2
 
 const char *ssid = "GalaxyIOT";
 const char *password = "12345678";
 
-const char *server_url = "https://door-web.vercel.app/api/rfid";
-const char *local_server_url = "http://192.168.106.152:3000/api/rfid";
+#define USE_LOCAL 1
+
+#if USE_LOCAL
+const char *server_url = "http://192.168.106.152:3000/api";
+#else
+const char *server_url = "https://door-web.vercel.app/api";
+#endif
 
 const char *mqttServer =
     "87551fa9e51248908034dbe24e14f5d3.s2.eu.hivemq.cloud";
@@ -30,21 +39,25 @@ PubSubClient client(espClient);
 MFRC522 rfid1(SS1, 2);
 MFRC522 rfid2(SS2, 2);
 
-// FUNCTIONS
+std::unordered_set<unsigned int> petUIDs;
+
+const char *mqttTopics[] = {"door", "lock", "status", "door/status/req", "lock/status/req"};
+
+// ---------- WIFI ---------- //
 
 void setupWiFi() {
     Serial.print("Connecting to WiFi...");
     WiFi.begin(ssid, password);
 
     while (WiFi.status() != WL_CONNECTED) {
-        digitalWrite(LED_BUILTIN, LOW);  // Turn off LED while disconnected
         delay(500);
         Serial.print(".");
     }
 
     Serial.println(" Connected!");
-    digitalWrite(LED_BUILTIN, HIGH);  // Turn on LED when connected
 }
+
+// ---------- HANDLERS ---------- //
 
 int timeToAutoCloseDoor = -1;
 int defaultTimeToAutoCloseDoor = 50;
@@ -56,6 +69,7 @@ void handleDoor(bool open) {
 
     isDoorOpen = open;
     SerialUART.println(open ? "open" : "close");
+    client.publish("door/status/res", isDoorOpen ? "true" : "false");
 
     if (isDoorOpen) {
         timeToAutoCloseDoor = defaultTimeToAutoCloseDoor;
@@ -69,6 +83,40 @@ void handleLock(bool locked) {
 
     isLocked = locked;
     SerialUART.println(locked ? "lock" : "unlock");
+    client.publish("lock/status/res", isLocked ? "true" : "false");
+}
+
+void handleAutoCloseLoop() {
+    if (timeToAutoCloseDoor > 0) {
+        timeToAutoCloseDoor -= 1;
+        Serial.printf("Time remaining: %d\n", timeToAutoCloseDoor);
+    } else if (timeToAutoCloseDoor == 0) {
+        handleDoor(false);
+        timeToAutoCloseDoor = -1;
+    }
+}
+
+// ---------- MQTT ---------- //
+
+void connectMQTT() {
+    while (!client.connected()) {
+        Serial.print("Connecting to MQTT...");
+        espClient.setInsecure();
+        if (client.connect("ESP32_Client", mqttUser, mqttPassword)) {
+            Serial.println(" Connected!");
+
+            for (auto topic : mqttTopics) {
+                client.subscribe(topic);
+                Serial.print("Subscribed to topic: ");
+                Serial.println(topic);
+            }
+        } else {
+            Serial.print("Failed, rc=");
+            Serial.print(client.state());
+            Serial.println(" Retrying in 5 seconds...");
+            delay(5000);
+        }
+    }
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -101,24 +149,47 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
         if (message == "ping") {
             client.publish("status", "online");
         }
+    } else if (topicString == "door/status/req") {
+        if (message == "ping") {
+            client.publish("door/status/res", isDoorOpen ? "true" : "false");
+        }
+    } else if (topicString == "lock/status/req") {
+        if (message == "ping") {
+            client.publish("lock/status/res", isLocked ? "true" : "false");
+        }
     }
 }
 
-void reconnectMQTT() {
-    while (!client.connected()) {
-        Serial.print("Connecting to MQTT...");
-        espClient.setInsecure();
-        if (client.connect("ESP32_Client", mqttUser, mqttPassword)) {
-            Serial.println(" Connected!");
-            client.subscribe("lock");
-            client.subscribe("door");
-        } else {
-            Serial.print("Failed, rc=");
-            Serial.print(client.state());
-            Serial.println(" Retrying in 5 seconds...");
-            delay(5000);
-        }
+void requestPetUpdate() {
+    Serial.println("Updating pet list...");
+    String endpoint = String(server_url) + String("/pet?uids=true");
+    String payload = HTTPUtils::get(endpoint);
+
+    petUIDs = std::unordered_set<unsigned int>();
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.f_str());
+        return;
     }
+
+    JsonArray array = doc.as<JsonArray>();
+
+    for (JsonVariant v : array) {
+        String uidString = v.as<String>();
+        unsigned int uid = strtoul(uidString.c_str(), nullptr, 16);
+        petUIDs.insert(uid);
+    }
+
+    Serial.print("Updated pet list: ");
+    for (auto uid : petUIDs) {
+        Serial.print(String(uid, HEX));
+        Serial.print(", ");
+    }
+    Serial.println();
 }
 
 void readRFID(MFRC522 &rfid, int csPin) {
@@ -132,7 +203,7 @@ void readRFID(MFRC522 &rfid, int csPin) {
     Serial.print(csPin == SS1 ? "1" : "2");
     Serial.print(" - Card UID: ");
 
-    int uid;
+    unsigned long uid;
 
     for (byte i = 0; i < rfid.uid.size; i++) {
         Serial.print(rfid.uid.uidByte[i] < 0x10 ? " 0" : " ");
@@ -142,14 +213,18 @@ void readRFID(MFRC522 &rfid, int csPin) {
     Serial.println();
     Serial.println(uid, HEX);
 
-    handleDoor(!isDoorOpen);
-
-    if (isDoorOpen) {
+    JsonDocument payload;
+    if (petUIDs.find(uid) != petUIDs.end()) {
         handleDoor(true);
-        timeToAutoCloseDoor = defaultTimeToAutoCloseDoor;
+        payload["allowed"] = true;
     } else {
-        handleDoor(true);
+        payload["allowed"] = false;
     }
+
+    payload["rfid"] = String(uid, HEX);
+    String jsonString;
+    serializeJson(payload, jsonString);
+    client.publish("rfid", jsonString.c_str());
 
     // HTTPUtils::post(String(local_server_url), String(uid, HEX));
 
@@ -157,17 +232,7 @@ void readRFID(MFRC522 &rfid, int csPin) {
     digitalWrite(csPin, HIGH);
 }
 
-void autoCloseLoop() {
-    if (timeToAutoCloseDoor > 0) {
-        timeToAutoCloseDoor -= 1;
-        Serial.printf("Time remaining: %d\n", timeToAutoCloseDoor);
-    } else if (timeToAutoCloseDoor == 0) {
-        handleDoor(false);
-        timeToAutoCloseDoor = -1;
-    }
-}
-
-// MAIN FUNCTIONS
+// ---------- MAIN FUNCTIONS ---------- //
 
 void setup() {
     Serial.begin(9600);
@@ -178,7 +243,6 @@ void setup() {
 
     SPI.begin();
 
-    pinMode(LED_BUILTIN, OUTPUT);  // Set LED as output
     pinMode(SS1, OUTPUT);
     pinMode(SS2, OUTPUT);
     digitalWrite(SS1, HIGH);
@@ -192,22 +256,23 @@ void setup() {
 
     client.setServer(mqttServer, mqttPort);
     client.setCallback(mqttCallback);
+
+    requestPetUpdate();
 }
 
 void loop() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi lost. Reconnecting...");
-        digitalWrite(LED_BUILTIN, LOW);  // Turn off LED while disconnected
         setupWiFi();
     }
 
     if (!client.connected()) {
-        reconnectMQTT();
+        connectMQTT();
     }
 
     readRFID(rfid1, SS1);
     readRFID(rfid2, SS2);
 
-    autoCloseLoop();
+    handleAutoCloseLoop();
     client.loop();
 }

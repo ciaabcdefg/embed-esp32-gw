@@ -9,4 +9,8 @@ namespace HTTPUtils {
 /// @param data data to be sent
 void post(String url, String data);
 
-} // namespace HTTPUtils
+/// @brief Sends a GET request to the specified URL.
+/// @param url URL to send the request to
+String get(String url);
+
+}  // namespace HTTPUtils
