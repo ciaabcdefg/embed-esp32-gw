@@ -96,7 +96,7 @@ void handleAutoCloseLoop() {
     }
 }
 
-// ---------- MQTT ---------- //
+// ---------- MQTT ---  ------- //
 
 void connectMQTT() {
     while (!client.connected()) {
@@ -126,7 +126,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
         message += (char)payload[i];  // Append each character to the String
     }
 
-    Serial.printf("Message received on topic '%s': '%s'\n", topicString, message);
+    Serial.printf("Topic '%s': '%s'\n", topicString, message);
 
     if (topicString == "lock") {
         if (message == "true") {
@@ -236,7 +236,7 @@ void readRFID(MFRC522 &rfid, int csPin) {
 
 void setup() {
     Serial.begin(9600);
-    SerialUART.begin(921600, SERIAL_8N1, 16, 17);
+    SerialUART.begin(9600, SERIAL_8N1, 16, 17);
 
     handleDoor(false);
     handleLock(false);
