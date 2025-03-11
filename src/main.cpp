@@ -41,7 +41,10 @@ MFRC522 rfid2(SS2, 2);
 
 std::unordered_set<unsigned int> petUIDs;
 
-const char *mqttTopics[] = {"door", "lock", "status", "door/status/req", "lock/status/req"};
+const char *mqttTopics[] = {
+    "door", "lock", "status", "door/status/req", "lock/status/req", "pet"};
+
+void updatePetList();
 
 // ---------- WIFI ---------- //
 
@@ -157,10 +160,14 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
         if (message == "ping") {
             client.publish("lock/status/res", isLocked ? "true" : "false");
         }
+    } else if (topicString == "pet") {
+        if (message == "changed") {
+            updatePetList();
+        }
     }
 }
 
-void requestPetUpdate() {
+void updatePetList() {
     Serial.println("Updating pet list...");
     String endpoint = String(server_url) + String("/pet?uids=true");
     String payload = HTTPUtils::get(endpoint);
@@ -257,7 +264,7 @@ void setup() {
     client.setServer(mqttServer, mqttPort);
     client.setCallback(mqttCallback);
 
-    requestPetUpdate();
+    updatePetList();
 }
 
 void loop() {
