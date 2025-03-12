@@ -15,7 +15,7 @@
 const char *ssid = "GalaxyIOT";
 const char *password = "12345678";
 
-#define USE_LOCAL 1
+#define USE_LOCAL 0
 
 #if USE_LOCAL
 const char *server_url = "http://192.168.106.152:3000/api";
