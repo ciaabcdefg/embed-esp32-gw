@@ -28,6 +28,47 @@ void post(String url, String data) {
     http.end();
 }
 
+void postTask(void* parameter) {
+    PostTaskParams* params = (PostTaskParams*)parameter;
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[HTTP] Error: not connected to WiFi");
+    } else {
+        HTTPClient http;
+        http.begin(params->url);
+
+        Serial.println("[HTTP] POST " + params->url);
+        int httpCode = http.POST(params->data);
+
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.println("[HTTP] Response code: " + String(httpCode));
+            Serial.println("[HTTP] Response payload: " + payload);
+        } else {
+            Serial.println("[HTTP] Error in sending POST request");
+        }
+
+        http.end();
+    }
+
+    delete params;      // Free allocated memory
+    vTaskDelete(NULL);  // Delete task after execution
+}
+
+void postAsync(String url, String data) {
+    PostTaskParams* params = new PostTaskParams{url, data};  // Allocate memory for parameters
+
+    xTaskCreatePinnedToCore(
+        postTask,          // Function to execute
+        "HTTP_Post_Task",  // Task name
+        10000,             // Stack size
+        params,            // Parameter to pass
+        1,                 // Priority
+        NULL,              // Task handle (not needed)
+        0                  // Core ID (0 or 1)
+    );
+}
+
 String get(String url) {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[HTTP] Error: not connected to WiFi");

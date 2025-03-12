@@ -13,4 +13,12 @@ void post(String url, String data);
 /// @param url URL to send the request to
 String get(String url);
 
+struct PostTaskParams {
+    String url;
+    String data;
+};
+
+void postAsync(String url, String data);
+void postTask(void* parameter);
+
 }  // namespace HTTPUtils

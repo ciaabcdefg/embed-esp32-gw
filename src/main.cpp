@@ -221,11 +221,25 @@ void readRFID(MFRC522 &rfid, int csPin) {
     Serial.println(uid, HEX);
 
     JsonDocument payload;
+    int prevTime = timeToAutoCloseDoor;
+
     if (petUIDs.find(uid) != petUIDs.end()) {
         handleDoor(true);
         payload["allowed"] = true;
     } else {
         payload["allowed"] = false;
+    }
+
+    if ((isDoorOpen && prevTime == -1) || !isDoorOpen) {
+        JsonDocument payload;
+        payload["uid_str"] = String(uid, HEX);
+        payload["rfid"] = csPin == SS1 ? 0 : 1;
+        payload["opened"] = isDoorOpen;
+
+        String jsonString;
+        serializeJson(payload, jsonString);
+
+        HTTPUtils::postAsync(String(server_url) + String("/door/log"), jsonString);
     }
 
     payload["rfid"] = String(uid, HEX);
